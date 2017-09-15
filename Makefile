@@ -106,9 +106,9 @@ ifeq ($(PLATFORM),windows)
 
 windocker::
 	docker-compose build
-	docker rm -f inthezone-pros_data || true
-	docker create -v /"$(shell pwd)":/build/inthezone-pros --name inthezone-pros_data inthezone-pros
-	winpty docker run -it --rm --volumes-from inthezone-pros_data inthezone-pros
+	docker rm -f inthezone-pros_project_data || true
+	docker create -v /"$(shell pwd)":/build/project --name inthezone-pros_project_data inthezone-pros
+	winpty docker run -it --rm --volumes-from inthezone-pros_project_data inthezone-pros
 
 else
 
