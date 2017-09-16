@@ -31,7 +31,6 @@
  */
 void operatorControl() {
 	while (1) {
-		writeJINXData("test", "true");
 		delay(20);
 	}
 }

@@ -37,9 +37,9 @@ void initializeIO() {
  * can be implemented in this task if desired.
  */
 void initialize() {
-	//Sets communication port for JINX data and start task to parse incoming messages.
-	initJINX(stdout);
-	delay(100);
-	taskCreate(JINXRun, TASK_DEFAULT_STACK_SIZE, NULL, (TASK_PRIORITY_DEFAULT));
-	delay(100);
+  //Sets communication port for JINX data and start task to parse incoming messages.
+  initJINX(stdout);
+  delay(100);
+  taskCreate(JINXRun, TASK_DEFAULT_STACK_SIZE, NULL, (TASK_PRIORITY_DEFAULT));
+  delay(100);
 }
