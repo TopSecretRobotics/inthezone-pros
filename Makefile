@@ -1,27 +1,4 @@
-# Universal C Makefile for MCU targets
-
-# Path to project root (for top-level, so the project is in ./; first-level, ../; etc.)
-ROOT=.
-# Binary output directory
-BINDIR=$(ROOT)/bin
-# Subdirectories to include in the build
-SUBDIRS=src
-
-# Nothing below here needs to be modified by typical users
-
-# Include common aspects of this project
--include $(ROOT)/common.mk
-
-ASMSRC:=$(wildcard *.$(ASMEXT))
-ASMOBJ:=$(patsubst %.o,$(BINDIR)/%.o,$(ASMSRC:.$(ASMEXT)=.o))
-HEADERS:=$(wildcard *.$(HEXT))
-CSRC=$(wildcard *.$(CEXT))
-COBJ:=$(patsubst %.o,$(BINDIR)/%.o,$(CSRC:.$(CEXT)=.o))
-CPPSRC:=$(wildcard *.$(CPPEXT))
-CPPOBJ:=$(patsubst %.o,$(BINDIR)/%.o,$(CPPSRC:.$(CPPEXT)=.o))
-OUT:=$(BINDIR)/$(OUTNAME)
-
-.PHONY: all clean upload _force_look windocker
+.PHONY: all app clean deps flash flash-pros format lsusb shell windocker
 
 # Verbosity.
 
@@ -49,66 +26,96 @@ endif
 export PLATFORM
 endif
 
+ifeq ($(MACHINE),)
+MACHINE = unknown
+ifeq ($(PLATFORM),linux)
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_M),armv7l)
+MACHINE = armv7l
+endif
+endif
+export MACHINE
+endif
+
 ifeq ($(PLATFORM),darwin)
 CORTEXFLASH ?= $(CURDIR)/tools/cortexflash.darwin
 else ifeq ($(PLATFORM),linux)
+ifeq ($(MACHINE),armv7l)
+CORTEXFLASH ?= $(CURDIR)/tools/cortexflash.linux.armv7l
+else
 CORTEXFLASH ?= $(CURDIR)/tools/cortexflash.linux
+endif
 else ifeq ($(PLATFORM),windows)
 CORTEXFLASH ?= $(CURDIR)/tools/cortexflash.exe
 endif
 
-# By default, compile program
-all: $(BINDIR) $(OUT)
+# Core targets.
 
-# Remove all intermediate object files (remove the binary directory)
-clean:
-	-rm -f $(OUT)
-	-rm -rf $(BINDIR)
+all:: app
 
-# Uploads program to device
-upload: all
-	$(UPLOAD)
+clean::
+	$(MAKE) -C pros clean
 
-# Phony force-look target
-_force_look:
-	@true
+deps::
 
-# Looks in subdirectories for things to make
-$(SUBDIRS): %: _force_look
-	@$(MAKE) --no-print-directory -C $@
+app::
+	$(MAKE) -C pros
 
-# Ensure binary directory exists
-$(BINDIR):
-	-@mkdir -p $(BINDIR)
+format::
+	$(verbose) clang-format -i pros/src/*.c pros/include/*.h
 
-# Compile program
-$(OUT): $(SUBDIRS) $(ASMOBJ) $(COBJ) $(CPPOBJ)
-	@echo LN $(BINDIR)/*.o $(LIBRARIES) to $@
-	@$(CC) $(LDFLAGS) $(BINDIR)/*.o $(LIBRARIES) -o $@
-	@$(MCUPREFIX)size $(SIZEFLAGS) $(OUT)
-	$(MCUPREPARE)
+ifeq ($(PLATFORM),windows)
 
-# Assembly source file management
-$(ASMOBJ): $(BINDIR)/%.o: %.$(ASMEXT) $(HEADERS)
-	@echo AS $<
-	@$(AS) $(AFLAGS) -o $@ $<
+VEX_DEVICE ?= $(word 1, $(shell (pros lsusb | grep -i com | head -n 1)))
 
-# Object management
-$(COBJ): $(BINDIR)/%.o: %.$(CEXT) $(HEADERS)
-	@echo CC $(INCLUDE) $<
-	$(CC) $(INCLUDE) $(CFLAGS) -o $@ $<
+else
 
-$(CPPOBJ): $(BINDIR)/%.o: %.$(CPPEXT) $(HEADERS)
-	@echo CPC $(INCLUDE) $<
-	@$(CPPCC) $(INCLUDE) $(CPPFLAGS) -o $@ $<
+VEX_DEVICE ?= $(word 1, $(shell (pros lsusb | grep -i vex | head -n 1)))
+
+endif
+
+flash-pros::
+	$(MAKE) -C pros flash
+
+ifeq ($(VEX_DEVICE),)
+
+flash::
+	$(error No device found. Connect USB device or specify with VEX_DEVICE environment variable)
+
+shell::
+	$(error No device found. Connect USB device or specify with VEX_DEVICE environment variable)
+
+else
+
+flash::
+	-$(verbose) "$(CORTEXFLASH)" -X -w "$(CURDIR)/pros/bin/output.bin" -v -g 0x0 $(VEX_DEVICE)
+
+ifeq ($(PLATFORM),windows)
+
+shell::
+	$(verbose) putty -serial $(VEX_DEVICE) -sercfg 115200
+
+# $(error You will need to use PuTTY to connect to device $(VEX_DEVICE) at speed 115200)
+
+else
+
+shell::
+	$(verbose) screen $(VEX_DEVICE) 115200
+
+endif
+
+endif
+
+lsusb::
+	$(verbose) pros lsusb
 
 ifeq ($(PLATFORM),windows)
 
 windocker::
 	docker-compose build
-	docker rm -f inthezone-pros_project_data || true
-	docker create -v /"$(shell pwd)":/build/project --name inthezone-pros_project_data inthezone-pros
-	winpty docker run -it --rm --volumes-from inthezone-pros_project_data inthezone-pros
+	docker rm -f inthezonepros_project_data || true
+	docker create -v /"$(shell pwd)":/build/project --name inthezonepros_project_data inthezonepros_project
+	winpty docker run -it --rm --volumes-from inthezonepros_project_data inthezonepros_project
 
 else
 

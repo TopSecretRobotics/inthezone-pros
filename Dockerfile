@@ -1,4 +1,4 @@
-FROM ubuntu:artful
+FROM ubuntu:yakkety
 
 # Add dependencies
 RUN apt-get update && \

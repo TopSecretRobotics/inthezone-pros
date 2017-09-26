@@ -1,0 +1,25 @@
+language: generic
+
+sudo: required
+
+services:
+  - docker
+
+notifications:
+  email: false
+
+cache:
+  directories:
+    - inthezone-pros
+
+before_install:
+  -
+    if [ -e "inthezone-pros/image.tar" ]; then
+      docker load -i "inthezone-pros/image.tar";
+    else
+      docker build -t "inthezone-pros" -f Dockerfile .;
+      mkdir -p "inthezone-pros"; docker save -o "inthezone-pros/image.tar" "inthezone-pros";
+    fi
+
+script:
+  - docker run -v `pwd`:/build/project "inthezone-pros" sh -c 'make'
