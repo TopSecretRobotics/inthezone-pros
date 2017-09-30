@@ -13,6 +13,7 @@
  */
 
 #include "main.h"
+#include "server.h"
 
 /*
  * Runs the user operator control code. This function will be started in its own task with the
@@ -34,7 +35,18 @@
 void
 operatorControl()
 {
+    (void)lcdClear(uart1);
+
+    serverIpv4_t ipv4;
+
     while (1) {
+        (void)lcdPrint(uart1, 1, "%s", serverIsConnected() ? "CONNECTED" : "DISCONNECTED");
+        ipv4 = serverGetIpv4();
+        if (ipv4.v[0] == 0) {
+            (void)lcdSetText(uart1, 2, "                ");
+        } else {
+            (void)lcdPrint(uart1, 2, "%u.%u.%u.%u", ipv4.v[0], ipv4.v[1], ipv4.v[2], ipv4.v[3]);
+        }
         delay(20);
     }
 }

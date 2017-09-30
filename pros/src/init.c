@@ -13,6 +13,42 @@
  */
 
 #include "main.h"
+#include "server.h"
+#include "shell.h"
+
+#include "apollo.h"
+
+// static const ShellCommand commands[] = {{"adc", vexAdcDebug},
+//                                         {"spi", vexSpiDebug},
+//                                         {"motor", vexMotorDebug},
+//                                         {"lcd", vexLcdDebug},
+//                                         {"enc", vexEncoderDebug},
+//                                         {"son", vexSonarDebug},
+//                                         {"ime", vexIMEDebug},
+//                                         {"test", vexTestDebug},
+//                                         {"sm", cmd_sm},
+//                                         {"apollo", cmd_apollo},
+//                                         {NULL, NULL}};
+
+static void
+cmd_apollo(PROS_FILE *chp, int argc, char *argv[])
+{
+    (void)argc;
+    (void)argv;
+
+    apolloInit();
+
+    // run until any key press
+    while (fcount(chp) == 0) {
+        apolloUpdate();
+    }
+
+    apolloDeinit();
+}
+
+// configuration for the shell
+static const shellCommand_t shellCommands[] = {{"apollo", cmd_apollo}, {NULL, NULL}};
+static const shellConfig_t shellConfig = {stdout, shellCommands};
 
 /*
  * Runs pre-initialization code. This function will be started in kernel mode one time while the
@@ -25,6 +61,12 @@
 void
 initializeIO()
 {
+    (void)setTeamName("TopSecret");
+    (void)watchdogInit();
+    (void)serverSetup(uart2);
+    (void)serverInit();
+    (void)shellInit();
+    return;
 }
 
 /*
@@ -43,4 +85,11 @@ initializeIO()
 void
 initialize()
 {
+    (void)lcdInit(uart1);
+    (void)lcdSetBacklight(uart1, true);
+    (void)lcdSetText(uart1, 1, "PROS V2.12.0    ");
+    (void)lcdSetText(uart1, 2, "VEX CORTEX LCD1 ");
+    (void)serverStart();
+    (void)shellStart(&shellConfig);
+    return;
 }
