@@ -10,6 +10,8 @@
 
 #include <API.h>
 
+#define SERVER_WAIT_MILLISECONDS 2
+
 typedef struct serverIpv4_s {
     uint8_t v[4];
 } serverIpv4_t;

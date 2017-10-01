@@ -166,9 +166,12 @@ serverThread(void *arg)
     size_t rlen = 0;
     uint8_t *rbuf = NULL;
     server_t *srv = &server;
+    // int has_read = 0;
 
     // reset the heartbeat and published timers
     srv->rpc.timestamp = srv->rpc.heartbeat = srv->rpc.published = srv->rpc.sendstats = chTimeNow();
+    srv->rpc.cassette = 0xff;
+    srv->rpc.fp = NULL;
 
     while (1) {
         // printf("0 READ\r\n");
@@ -176,10 +179,19 @@ serverThread(void *arg)
         rbuf = srv->rpc.in.buf;
         // printf("1 READ: rlen=%lu\r\n", rlen);
         // printf("0 DELIVER\r\n");
+        // if (rlen > 0) {
+        //     has_read = 1;
+        //     printf("READ:");
+        // }
         while (rlen-- > 0) {
+            // printf(" %u", *rbuf);
             (void)sfpDeliverOctet(&srv->sfp, *rbuf, NULL, 0, NULL);
             rbuf++;
         }
+        // if (has_read) {
+        //     printf("\r\n");
+        // }
+        // has_read = 0;
         // printf("1 DELIVER\r\n");
         // printf("0 CHECK\r\n");
         (void)serverCheckConnection(srv);
@@ -190,7 +202,7 @@ serverThread(void *arg)
             // printf("1 LOOP\r\n");
         }
         // printf("0 SLEEP\r\n");
-        vexSleep(2);
+        vexSleep(SERVER_WAIT_MILLISECONDS);
         // printf("1 SLEEP\r\n");
     }
 
@@ -207,6 +219,8 @@ serverReset(server_t *srv)
     serverIpv4_t ipv4Empty = {{0, 0, 0, 0}};
     srv->state = serverStateDisconnected;
     srv->rpc.seq_id = 0;
+    srv->rpc.motor[0] = srv->rpc.motor[1] = srv->rpc.motor[2] = srv->rpc.motor[3] = srv->rpc.motor[4] = srv->rpc.motor[5] =
+        srv->rpc.motor[6] = srv->rpc.motor[7] = srv->rpc.motor[8] = srv->rpc.motor[9] = 0;
     srv->rpc.timestamp = chTimeNow();
     (void)memcpy(&srv->rpc.ipv4, &ipv4Empty, 4);
     (void)sfpInit(&srv->sfp);
@@ -243,7 +257,7 @@ serverWrite(uint8_t *octets, size_t len, size_t *outlen, void *userdata)
     len -= wlen;
     while (len > 0) {
         octets += wlen;
-        vexSleep(2);
+        vexSleep(SERVER_WAIT_MILLISECONDS);
         // printf("NEED TO WRITE %u BYTES:", len);
         // for (int i = 0; i < len; i++) {
         //     printf(" %u", (uint8_t)octets[i]);
@@ -277,6 +291,17 @@ serverCheckConnection(server_t *srv)
     if (srv->state == serverStateDisconnected) {
         if (sfpIsConnected(&srv->sfp)) {
             srv->rpc.timestamp = srv->rpc.heartbeat = srv->rpc.published = srv->rpc.sendstats = chTimeNow();
+            for (int i = 0; i < RPC_SUB_MAX; i++) {
+                srv->rpc.subs[i].active = false;
+                srv->rpc.subs[i].req_id = 0;
+                srv->rpc.subs[i].topic = 0;
+                srv->rpc.subs[i].subtopic = 0;
+            }
+            srv->rpc.cassette = 0xff;
+            if (srv->rpc.fp != NULL) {
+                (void)fclose(srv->rpc.fp);
+                srv->rpc.fp = NULL;
+            }
             srv->state = serverStateConnected;
         }
     } else if (srv->state == serverStateConnected) {

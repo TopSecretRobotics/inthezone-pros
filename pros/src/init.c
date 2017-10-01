@@ -61,8 +61,9 @@ static const shellConfig_t shellConfig = {stdout, shellCommands};
 void
 initializeIO()
 {
-    (void)setTeamName("TopSecret");
+    (void)standaloneModeEnable();
     (void)watchdogInit();
+    (void)setTeamName("TopSecret");
     (void)serverSetup(uart2);
     (void)serverInit();
     (void)shellInit();

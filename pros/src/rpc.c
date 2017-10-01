@@ -6,6 +6,7 @@
 /*-----------------------------------------------------------------------------*/
 
 #include "rpc.h"
+#include "cassette.h"
 #include "portable_endian.h"
 
 #include <stdlib.h>
@@ -50,8 +51,10 @@ static void rpcRecvRead(rpc_t *rpc, const message_read_t *read);
 static void rpcRecvReadPubsub(rpc_t *rpc, const message_read_t *read);
 static void rpcRecvReadClock(rpc_t *rpc, const message_read_t *read);
 static void rpcRecvReadMotor(rpc_t *rpc, const message_read_t *read);
+static void rpcRecvReadCassette(rpc_t *rpc, const message_read_t *read);
 static void rpcRecvWrite(rpc_t *rpc, const message_write_t *write);
 static void rpcRecvWriteMotor(rpc_t *rpc, const message_write_t *write);
+static void rpcRecvWriteCassette(rpc_t *rpc, const message_write_t *write);
 static void rpcRecvSubscribe(rpc_t *rpc, const message_subscribe_t *subscribe);
 static void rpcRecvUnsubscribe(rpc_t *rpc, const message_unsubscribe_t *unsubscribe);
 static int rpcSendData(rpc_t *rpc, uint16_t req_id, uint8_t topic, uint8_t subtopic, uint8_t flag, uint8_t len, uint8_t *value);
@@ -71,7 +74,7 @@ rpcLoop(rpc_t *rpc)
     uint16_t value16;
     uint8_t *tbuf = (void *)rpc->tmp;
     uint8_t tlen = 0;
-    if (chTimeElapsedSince(rpc->published) > 25) {
+    if (chTimeElapsedSince(rpc->published) >= RPC_PUB_TIMEOUT) {
         for (i = 0; i < RPC_SUB_MAX; i++) {
             if (rpc->subs[i].active) {
                 (void)rpcPublish(rpc, &rpc->subs[i]);
@@ -79,7 +82,7 @@ rpcLoop(rpc_t *rpc)
         }
         rpc->published = chTimeNow();
     }
-    if (chTimeElapsedSince(rpc->sendstats) > 1000) {
+    if (chTimeElapsedSince(rpc->sendstats) >= RPC_INFO_TIMEOUT) {
         value32 = (uint32_t)chTimeNow();
         value32 = (uint32_t)(htonl(value32));
         (void)memcpy(tbuf, &value32, 4);
@@ -154,8 +157,13 @@ rpcPublishMotor(rpc_t *rpc, rpcSubscription_t *sub)
     uint8_t *tbuf = (void *)rpc->tmp;
     uint8_t tlen = 0;
     if (sub->subtopic < kVexMotorNum) {
+        index = sub->subtopic;
         i = (int16_t)sub->subtopic;
         value = (int8_t)vexMotorGet(i);
+        if (value == rpc->motor[index]) {
+            return;
+        }
+        rpc->motor[index] = value;
         (void)rpcSendPub(rpc, sub, 1, (void *)&value);
         return;
     }
@@ -163,15 +171,21 @@ rpcPublishMotor(rpc_t *rpc, rpcSubscription_t *sub)
     case MESSAGES_TOPIC_MOTOR_SUBTOPIC_ALL:
         for (i = kVexMotor_1; i < kVexMotorNum; i++) {
             index = (int8_t)i;
+            value = (int8_t)vexMotorGet(i);
+            if (value == rpc->motor[index]) {
+                continue;
+            }
+            rpc->motor[index] = value;
             (void)memcpy(tbuf, &index, 1);
             tbuf += 1;
             tlen += 1;
-            value = (int8_t)vexMotorGet(i);
             (void)memcpy(tbuf, &value, 1);
             tbuf += 1;
             tlen += 1;
         }
-        (void)rpcSendPub(rpc, sub, tlen, (void *)rpc->tmp);
+        if (tlen > 0) {
+            (void)rpcSendPub(rpc, sub, tlen, (void *)rpc->tmp);
+        }
         break;
     default:
         (void)rpcSendPubError(rpc, sub, MESSAGES_ERROR_BAD_SUBTOPIC);
@@ -296,6 +310,9 @@ rpcRecvRead(rpc_t *rpc, const message_read_t *read)
         break;
     case MESSAGES_TOPIC_MOTOR:
         (void)rpcRecvReadMotor(rpc, read);
+        break;
+    case MESSAGES_TOPIC_CASSETTE:
+        (void)rpcRecvReadCassette(rpc, read);
         break;
     default:
         (void)rpcSendRepError(rpc, read->req_id, read->topic, read->subtopic, MESSAGES_ERROR_BAD_TOPIC);
@@ -430,8 +447,12 @@ rpcRecvReadMotor(rpc_t *rpc, const message_read_t *read)
     uint8_t *tbuf = (void *)rpc->tmp;
     uint8_t tlen = 0;
     if (read->subtopic < kVexMotorNum) {
+        index = read->subtopic;
         i = (int16_t)read->subtopic;
         value = (int8_t)vexMotorGet(i);
+        if (value != rpc->motor[index]) {
+            rpc->motor[index] = value;
+        }
         (void)rpcSendRep(rpc, read, 1, (void *)&value);
         return;
     }
@@ -439,10 +460,13 @@ rpcRecvReadMotor(rpc_t *rpc, const message_read_t *read)
     case MESSAGES_TOPIC_MOTOR_SUBTOPIC_ALL:
         for (i = kVexMotor_1; i < kVexMotorNum; i++) {
             index = (int8_t)i;
+            value = (int8_t)vexMotorGet(i);
+            if (value != rpc->motor[index]) {
+                rpc->motor[index] = value;
+            }
             (void)memcpy(tbuf, &index, 1);
             tbuf += 1;
             tlen += 1;
-            value = (int8_t)vexMotorGet(i);
             (void)memcpy(tbuf, &value, 1);
             tbuf += 1;
             tlen += 1;
@@ -457,11 +481,105 @@ rpcRecvReadMotor(rpc_t *rpc, const message_read_t *read)
 }
 
 static void
+rpcRecvReadCassette(rpc_t *rpc, const message_read_t *read)
+{
+    uint8_t flag;
+    uint8_t value;
+    uint32_t rlen = 0;
+    int c;
+    uint8_t *tbuf = (void *)rpc->tmp;
+    uint8_t tlen = 0;
+    PROS_FILE *fp = NULL;
+    if (read->subtopic < cassetteMax()) {
+        if (rpc->fp != NULL) {
+            (void)fflush(rpc->fp);
+            (void)rpcSendRep(rpc, read, 0, NULL);
+            return;
+        }
+        fp = cassetteOpenRead(read->subtopic);
+        if (fp == NULL) {
+            (void)rpcSendRep(rpc, read, 0, NULL);
+            return;
+        }
+        flag = 0;
+        while (!feof(fp)) {
+            printf("[0] rlen=%lu\r\n", rlen);
+            if (fcount(fp) == 0) {
+                vexSleep(2);
+            } else {
+                c = fgetc(fp);
+                if (c == -1) {
+                    vexSleep(2);
+                } else {
+                    printf("c = %d\r\n", c);
+                    // value = (uint8_t)c;
+                    (void)memcpy(tbuf, &c, 1);
+                    tbuf += 1;
+                    tlen += 1;
+                    rlen += 1;
+                    if (tlen >= 128) {
+                        tbuf = (void *)rpc->tmp;
+                        (void)rpcSendData(rpc, read->req_id, read->topic, read->subtopic, flag, tlen, tbuf);
+                        tlen = 0;
+                    }
+                }
+            }
+            printf("[1] rlen=%lu\r\n", rlen);
+        }
+        if (tlen > 0) {
+            tbuf = (void *)rpc->tmp;
+            (void)rpcSendData(rpc, read->req_id, read->topic, read->subtopic, flag, tlen, tbuf);
+            tlen = 0;
+        }
+        rlen = (uint32_t)(htonl(rlen));
+        (void)rpcSendRep(rpc, read, 4, (void *)&rlen);
+        (void)fclose(fp);
+        return;
+    }
+    switch (read->subtopic) {
+    case MESSAGES_TOPIC_CASSETTE_SUBTOPIC_OPEN:
+        if (rpc->fp != NULL) {
+            rlen = (uint32_t)ftell(rpc->fp);
+        }
+        value = (uint8_t)rpc->cassette;
+        (void)memcpy(tbuf, &value, 1);
+        tbuf += 1;
+        tlen += 1;
+        rlen = (uint32_t)(htonl(rlen));
+        (void)memcpy(tbuf, &rlen, 4);
+        tbuf += 4;
+        tlen += 4;
+        tbuf = (void *)rpc->tmp;
+        (void)rpcSendRep(rpc, read, tlen, (void *)tbuf);
+        break;
+    case MESSAGES_TOPIC_CASSETTE_SUBTOPIC_COUNT:
+        value = (uint8_t)cassetteCount();
+        (void)rpcSendRep(rpc, read, 1, (void *)&value);
+        break;
+    case MESSAGES_TOPIC_CASSETTE_SUBTOPIC_FREE:
+        value = (uint8_t)cassetteFree();
+        (void)rpcSendRep(rpc, read, 1, (void *)&value);
+        break;
+    case MESSAGES_TOPIC_CASSETTE_SUBTOPIC_MAX:
+        value = (uint8_t)cassetteMax();
+        (void)rpcSendRep(rpc, read, 1, (void *)&value);
+        break;
+    default:
+        (void)rpcSendRepError(rpc, read->req_id, read->topic, read->subtopic, MESSAGES_ERROR_BAD_SUBTOPIC);
+        break;
+    }
+    return;
+}
+
+static void
 rpcRecvWrite(rpc_t *rpc, const message_write_t *write)
 {
     switch (write->topic) {
     case MESSAGES_TOPIC_MOTOR:
         (void)rpcRecvWriteMotor(rpc, write);
+        break;
+    case MESSAGES_TOPIC_CASSETTE:
+        (void)rpcRecvWriteCassette(rpc, write);
         break;
     default:
         (void)rpcSendRepError(rpc, write->req_id, write->topic, write->subtopic, MESSAGES_ERROR_BAD_TOPIC);
@@ -507,6 +625,89 @@ rpcRecvWriteMotor(rpc_t *rpc, const message_write_t *write)
         value = (int8_t)(*wbuf);
         // (void)vex_printf("WRITE MOTOR: %d -> %d\r\n", (int16_t)index, (int16_t)value);
         (void)vexMotorSet((int16_t)index, (int16_t)value);
+    }
+    return;
+}
+
+static size_t
+sdAsynchronousWrite(PROS_FILE *sd, const uint8_t *buf, size_t len)
+{
+    size_t wlen = 0;
+    while (len > 0) {
+        (void)fputc((int)(*buf++), sd);
+        len--;
+        wlen++;
+    }
+    return wlen;
+    // return fwrite((const void *)buf, 1, len, sd);
+}
+
+static void
+rpcRecvWriteCassette(rpc_t *rpc, const message_write_t *write)
+{
+    uint8_t *wbuf = write->value;
+    switch (write->subtopic) {
+    case MESSAGES_TOPIC_CASSETTE_SUBTOPIC_OPEN:
+        if (write->len != 1) {
+            return;
+        }
+        if (*wbuf >= cassetteMax()) {
+            return;
+        }
+        if (rpc->cassette != 0xff) {
+            return;
+        }
+        rpc->cassette = *wbuf;
+        rpc->fp = cassetteOpenWrite(rpc->cassette);
+        if (rpc->fp == NULL) {
+            rpc->cassette = 0xff;
+        }
+        return;
+    case MESSAGES_TOPIC_CASSETTE_SUBTOPIC_CLOSE:
+        if (write->len != 1) {
+            return;
+        }
+        if (*wbuf >= cassetteMax()) {
+            return;
+        }
+        if (rpc->cassette == 0xff && rpc->fp == NULL) {
+            return;
+        }
+        if (rpc->cassette != *wbuf) {
+            return;
+        }
+        rpc->cassette = 0xff;
+        // uint8_t writeval = 0;
+        // (void)fwrite(&writeval, 1, 1, rpc->fp);
+        (void)fflush(rpc->fp);
+        (void)fclose(rpc->fp);
+        rpc->fp = NULL;
+        return;
+    case MESSAGES_TOPIC_CASSETTE_SUBTOPIC_WRITE:
+        if (write->len == 1 || write->len > 2) {
+            return;
+        }
+        if (*wbuf >= cassetteMax()) {
+            return;
+        }
+        if (rpc->cassette == 0xff && rpc->fp == NULL) {
+            return;
+        }
+        if (rpc->cassette != *wbuf) {
+            return;
+        }
+        wbuf += 1;
+        (void)sdAsynchronousWrite(rpc->fp, wbuf, write->len - 1);
+        // (void)fflush(rpc->fp);
+        // (void)fwrite(wbuf, 1, write->len - 1, rpc->fp);
+        if (fflush(rpc->fp) == EOF) {
+            rpc->cassette = 0xff;
+            (void)fclose(rpc->fp);
+            rpc->fp = NULL;
+        }
+        return;
+    default:
+        break;
     }
     return;
 }
