@@ -15,7 +15,7 @@
 #include "main.h"
 #include "server.h"
 
-static void replay(void);
+// static void replay(void);
 
 /*
  * Runs the user operator control code. This function will be started in its own task with the

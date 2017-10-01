@@ -503,7 +503,7 @@ rpcRecvReadCassette(rpc_t *rpc, const message_read_t *read)
         }
         flag = 0;
         while (!feof(fp)) {
-            printf("[0] rlen=%lu\r\n", rlen);
+            // printf("[0] rlen=%lu\r\n", rlen);
             if (fcount(fp) == 0) {
                 vexSleep(2);
             } else {
@@ -511,7 +511,7 @@ rpcRecvReadCassette(rpc_t *rpc, const message_read_t *read)
                 if (c == -1) {
                     vexSleep(2);
                 } else {
-                    printf("c = %d\r\n", c);
+                    // printf("c = %d\r\n", c);
                     // value = (uint8_t)c;
                     (void)memcpy(tbuf, &c, 1);
                     tbuf += 1;
@@ -524,7 +524,7 @@ rpcRecvReadCassette(rpc_t *rpc, const message_read_t *read)
                     }
                 }
             }
-            printf("[1] rlen=%lu\r\n", rlen);
+            // printf("[1] rlen=%lu\r\n", rlen);
         }
         if (tlen > 0) {
             tbuf = (void *)rpc->tmp;
