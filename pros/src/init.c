@@ -13,6 +13,8 @@
  */
 
 #include "main.h"
+
+#include "mtrmgr.h"
 #include "server.h"
 #include "shell.h"
 
@@ -64,6 +66,7 @@ initializeIO()
     (void)standaloneModeEnable();
     (void)watchdogInit();
     (void)setTeamName("TopSecret");
+    (void)motorManagerInit();
     (void)serverSetup(uart2);
     (void)serverInit();
     (void)shellInit();
